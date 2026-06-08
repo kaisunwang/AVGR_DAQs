@@ -34,7 +34,7 @@
 #define SPI_CS_PIN      1
 #define SPI_TX_PIN      3
 #define SPI_SCK_PIN     6
-#define SPI_BAUD_HZ     (12500u * 1000u)   // 12.5MHz
+#define SPI_BAUD_HZ     (6250u * 1000u)   // 6.25kHz
 
 #define A_PIN      27   // Select A (MSB)
 #define B_PIN      28   // Select B
@@ -56,7 +56,7 @@
 static trigger_time_t current_time = {0};
 
 // ---------- Peripherals ----------
-#define N_PERIPHS  8
+// N_PERIPHS now comes from sd_config.h
 #define DEFAULT_SAMPLE_HZ   (100u * 1000000u) //100 MHz
 uint8_t cap_cnt = 0;
 
@@ -123,7 +123,6 @@ static void rtc_init(void) {
     gpio_pull_up(RTC_SDA_PIN);
     gpio_pull_up(RTC_SCL_PIN);
     
-    // mcp_enable_battery(RTC_I2C);
 
     if (!mcp_is_running(RTC_I2C)) {
         // Seed an initial time from the firmware build time ("hh:mm:ss") and
@@ -140,6 +139,8 @@ static void rtc_init(void) {
         current_time = rtc_get_time(RTC_I2C);
         printf("RTC: %02u:%02u:%02u\n", current_time.hour, current_time.min, current_time.sec);
     }
+    mcp_enable_battery(RTC_I2C);
+    printf("RTC battery enabled\n");
 }
 
 
@@ -797,8 +798,9 @@ int main(void) {
         printf("ERROR: SD mount failed. Halting.\n");
         while (true) tight_loop_contents();
     }
-    neopixel_set_rgb(0, 0, 50);   // dim blue = SD ready, waiting
+    // neopixel_set_rgb(0, 0, 50);   // dim blue = SD ready, waiting
 
+    printf("Number of peripherals: %u\n", sd_get_num_periphs());
     demux_init();
 
     while (true) {
@@ -821,7 +823,7 @@ int main(void) {
         sleep_ms(1000);
         gpio_put(SPI_TX_PIN, 0);
         printf("ARM pulse received\n");
-        neopixel_off();
+        neopixel_deinit();
         
         sleep_ms(1000);
         gpio_put(SPI_TX_PIN, 0);
@@ -833,7 +835,7 @@ int main(void) {
         trigger_time = rtc_get_time(RTC_I2C);
         printf("RTC: %02u:%02u:%02u\n",
            trigger_time.hour, trigger_time.min, trigger_time.sec);
-        neopixel_blink_once(50, 50, 50, 500); // grey = trigger pulse initiated
+        // neopixel_blink_once(50, 50, 50, 500); // grey = trigger pulse initiated
         printf("TRIGGER pulse received\n");
 
         // 3. Wait for capture + bit-reversal to complete on peripherals
@@ -845,7 +847,7 @@ int main(void) {
         uint8_t rx[256] = {0};
         stdio_flush();
 
-        for (int v = 0; v < N_PERIPHS; v++) {
+        for (int v = 0; v < sd_get_num_periphs(); v++) {
             // Select peripheral via demux (CS is high/idle)
             int c_sel = (v >> 2) & 1;
             int b_sel = (v >> 1) & 1;
@@ -947,7 +949,7 @@ int main(void) {
                 // neopixel_blink_once(100, 0, 0, 1000); //red  
             }
             else {
-                neopixel_blink_once(0, 100, 0, 1000); //green
+                // neopixel_blink_once(0, 100, 0, 1000); //green
             }
 
             // sleep_ms(STEP_MS - FLASH_MS);

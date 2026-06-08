@@ -107,6 +107,10 @@ void neopixel_blink_service(void)
 /* Repeating timer: fires every 5 ms to service blink state machine */
 static repeating_timer_t g_np_timer;
 
+/* PIO program offset (saved at init so it can be removed on deinit). */
+static uint g_np_offset = 0;
+static bool g_np_inited = false;
+
 /* Timer callback: runs neopixel_blink_service(); return true to keep repeating */
 static bool neopixel_blink_timer_cb(repeating_timer_t *rt) {
     neopixel_blink_service();
@@ -157,18 +161,35 @@ void neopixel_blink_once(uint8_t r, uint8_t g, uint8_t b, uint32_t ms) {
 
 void neopixel_init(void) {
     /* Load PIO program, init state machine, configure GPIO16 */
-    uint np_offset = pio_add_program(NEOPIXEL_PIO, &ws2812_program);
-    ws2812_program_init(NEOPIXEL_PIO, NEOPIXEL_SM, np_offset,
+    g_np_offset = pio_add_program(NEOPIXEL_PIO, &ws2812_program);
+    ws2812_program_init(NEOPIXEL_PIO, NEOPIXEL_SM, g_np_offset,
                         NEOPIXEL_PIN, 800000.0f, NEOPIXEL_IS_RGBW);
+    g_np_inited = true;
 
     /* -5 ms = repeat every 5 ms (negative = relative, not absolute) */
     add_repeating_timer_ms(-5, neopixel_blink_timer_cb, NULL, &g_np_timer);
 
-    /* Dim orange blink during SD/config init (10k blinks = ~500 s if needed) */
-    neopixel_blink_multiple_start(15, 2, 0, 50, 50, 10000);
+    /* Start dark; status is shown with solid colors (no blinking). */
+    neopixel_off();
 }
 
 /* Stop the blink timer (e.g. after config loaded, final LED set elsewhere). */
 void neopixel_cancel_timer(void) {
     cancel_repeating_timer(&g_np_timer);
+}
+
+/* Fully release the NeoPixel: stop timer, blank the LED, disable the state
+ * machine, and remove the PIO program. Safe to call if already deinited. */
+void neopixel_deinit(void) {
+    if (!g_np_inited) return;
+
+    cancel_repeating_timer(&g_np_timer);
+    g_np_blink.active = false;
+
+    neopixel_off_raw();   // blank the LED before tearing down
+
+    pio_sm_set_enabled(NEOPIXEL_PIO, NEOPIXEL_SM, false);
+    pio_remove_program(NEOPIXEL_PIO, &ws2812_program, g_np_offset);
+
+    g_np_inited = false;
 }

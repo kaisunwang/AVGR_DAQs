@@ -24,7 +24,7 @@
 #include "capture.h"
 
 // ---------- Config ----------
-const uint TRIGGER_PIN   = 11;
+const uint TRIGGER_PIN   = 11; 
 const uint ARM_PIN       = SPI_RX_PIN;
 const bool TRIGGER_LEVEL = true;
 
@@ -280,10 +280,10 @@ int main(void) {
         pio_sm_exec(pio, sm, pio_encode_wait_gpio(TRIGGER_LEVEL, TRIGGER_PIN));
 
         printf("Waiting for ARM pin to go high...\n");
-        neopixel_set_rgb(0, 0, 100); // blue = waiting for ARM
+        // neopixel_set_rgb(0, 0, 100); // blue = waiting for ARM
         while (!gpio_get(ARM_PIN)) tight_loop_contents();
         neopixel_blink_once(50, 50, 50, 500); // grey = armed
-        neopixel_off();
+        neopixel_deinit();
 
         printf("Arming trigger for capture %lu...\n", (unsigned long)g_capture_index);
         g_capture_index++;
@@ -293,7 +293,7 @@ int main(void) {
         dma_channel_wait_for_finish_blocking(dma_chan);
         pio_sm_set_enabled(pio, sm, false);
         printf("Capture complete.\n");
-        neopixel_blink_once(50, 50, 50, 500); // grey = triggered + capture complete
+        // neopixel_blink_once(50, 50, 50, 500); // grey = triggered + capture complete
 
         uint8_t *bytes  = (uint8_t *)capture_buf; // recast as uint8_t rather than uint32_t
         // Bit-reverse every captured byte in place (treats capture_buf as a byte stream).
@@ -343,19 +343,8 @@ int main(void) {
         spi_write_blocking(SPI_SLAVE_INST, bytes, 131072u);
         spi_slave_deinit();
         printf("Transfer to central complete.\n");
-        neopixel_blink_once(0, 100, 0, 1000); // green = sent
+        // neopixel_blink_once(0, 100, 0, 1000); // green = sent
 
-        // if (ok) {
-        //     neopixel_set_rgb(0, 100, 0); // green = sent
-        // } else {
-        //     printf("ERROR: transfer to central failed. Halting.\n");
-        //     while (true) {
-        //         neopixel_set_rgb(100, 0, 0);
-        //         tight_loop_contents();
-        //     }
-        // }
-        // printf("Capture %lu done, sent %u words to central.\n",
-        //        (unsigned long)(g_capture_index - 1), buf_size_words);
     }
 }
 

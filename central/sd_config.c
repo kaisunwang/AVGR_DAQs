@@ -90,8 +90,12 @@ static uint32_t g_file_index = 0;
 static uint32_t g_run_index = 0;
 static char     g_run_dir_name[RUN_DIR_NAME_MAX_LEN] = {0};  // e.g. "RUN_00012"
 static uint32_t g_target_sample_hz = DEFAULT_SAMPLE_HZ;
-static char     g_base_prefix[FILE_PREFIX_MAX_LEN] = DEFAULT_FILE_PREFIX; // e.g. MTPA"
-static char     g_file_prefix[FILE_PREFIX_MAX_LEN] = DEFAULT_FILE_PREFIX; // e.g. "MTPA##_"
+// Per-peripheral capture prefixes. Index i (0-based) holds the value of
+// PREFIX(i+1) from config.txt, e.g. g_prefixes[0] <- "PREFIX1 = ...".
+static char     g_prefixes[MAX_PREFIXES][FILE_PREFIX_MAX_LEN];
+static bool     g_prefixes_inited = false;
+// Number of peripherals; set from config.txt "N = _", default DEFAULT_N_PERIPHS.
+static uint8_t  g_num_periphs = DEFAULT_N_PERIPHS;
 
 
 
@@ -129,7 +133,25 @@ static void trim_line(char *s) {
     }
 }
 
+// Fill every prefix slot with its default ("cap1", "cap2", ... 1-indexed).
+static void set_default_prefixes(void) {
+    for (uint8_t i = 0; i < MAX_PREFIXES; i++) {
+        snprintf(g_prefixes[i], FILE_PREFIX_MAX_LEN, "%s%u",
+                 DEFAULT_FILE_PREFIX, (unsigned)(i + 1));
+    }
+    g_prefixes_inited = true;
+}
+
+uint8_t sd_get_num_periphs(void) {
+    return g_num_periphs;
+}
+
 static config_state_t load_config_from_sd(void) {
+    // Start every prefix at its default ("cap1".."capN") and reset the
+    // peripheral count to its default; config.txt overrides both.
+    set_default_prefixes();
+    g_num_periphs = DEFAULT_N_PERIPHS;
+
     // Ensure SD init was attempted
     sd_init();
 
@@ -161,63 +183,57 @@ static config_state_t load_config_from_sd(void) {
     }
 
     // --- SD config file is open here ---
-
-    // Start from defaults
-    // uint32_t sd_sample_hz = DEFAULT_SAMPLE_HZ;
-    char     sd_prefix[FILE_PREFIX_MAX_LEN];
-    memcpy(sd_prefix, g_base_prefix, sizeof(sd_prefix));
-
+    // Parse "N = _" (peripheral count) and "PREFIXn = value" (n is 1-based).
     char line[64];
     while (f_gets(line, sizeof(line), &fil)) {
         trim_line(line);
 
-        // if (strncmp(line, "SAMPLE_HZ=", 10) == 0) {
-        //     const char *val = line + 10;
-        //     char *endptr = NULL;
-        //     uint32_t hz = (uint32_t)strtoul(val, &endptr, 10);
-        //     if (hz > 0 && hz <= 100000000u) {   // sanity clamp
-        //         sd_sample_hz = hz;
-        //         printf("Config: SAMPLE_HZ=%u\n", sd_sample_hz);
-        //     } else {
-        //         printf("Config: SAMPLE_HZ out of range, using default %u\n",
-        //                DEFAULT_SAMPLE_HZ);
-        //     }
-        if (strncmp(line, "PREFIX=", 7) == 0) {
-            const char *val = line + 7;
-            size_t len = strlen(val);
-            if (len >= FILE_PREFIX_MAX_LEN) len = FILE_PREFIX_MAX_LEN - 1;
-            memcpy(sd_prefix, val, len);
-            sd_prefix[len] = '\0';
-            printf("Config: PREFIX=\"%s\"\n", sd_prefix);
+        // "N = 3": set the peripheral count (1..MAX_PREFIXES).
+        if (line[0] == 'N') {
+            const char *q = line + 1;
+            while (*q == ' ' || *q == '\t') q++;
+            if (*q == '=') {
+                long n = strtol(q + 1, NULL, 10);
+                if (n >= 1 && n <= MAX_PREFIXES) {
+                    g_num_periphs = (uint8_t)n;
+                    printf("Config: N=%u\n", g_num_periphs);
+                } else {
+                    printf("Config: N out of range; using default %u\n", g_num_periphs);
+                }
+            }
+            continue;
         }
+
+        if (strncmp(line, "PREFIX", 6) != 0) continue;
+
+        // Read the 1-based index right after "PREFIX".
+        const char *p = line + 6;
+        char *endptr = NULL;
+        long idx1 = strtol(p, &endptr, 10);
+        if (endptr == p || idx1 < 1 || idx1 > MAX_PREFIXES) {
+            continue;  // not a valid PREFIXn
+        }
+
+        // Skip optional spaces, require '=', then skip spaces before the value.
+        const char *q = endptr;
+        while (*q == ' ' || *q == '\t') q++;
+        if (*q != '=') continue;
+        q++;
+        while (*q == ' ' || *q == '\t') q++;
+
+        // Copy the value into the matching slot (PREFIXn -> index n-1).
+        size_t len = strlen(q);
+        if (len >= FILE_PREFIX_MAX_LEN) len = FILE_PREFIX_MAX_LEN - 1;
+        memcpy(g_prefixes[idx1 - 1], q, len);
+        g_prefixes[idx1 - 1][len] = '\0';
+        printf("Config: PREFIX%ld=\"%s\"\n", idx1, g_prefixes[idx1 - 1]);
     }
 
     f_close(&fil);
 
-    // // Apply SD config to globals
-    // g_target_sample_hz = sd_sample_hz;
-    memcpy(g_base_prefix, sd_prefix, sizeof(g_base_prefix));
-    // memset(sd_cfg.prefix, 0, sizeof(sd_cfg.prefix));
-    // strncpy(sd_cfg.prefix, sd_prefix, sizeof(sd_cfg.prefix) - 1);
-
-    // bool same = false;
-    // if (have_flash_cfg) {
-    //     same = (flash_cfg.sample_hz == sd_cfg.sample_hz) &&
-    //            (strncmp(flash_cfg.prefix, sd_cfg.prefix, FILE_PREFIX_MAX_LEN) == 0);
-    // }
-
-    // if (!have_flash_cfg || !same) {
-    //     // New or changed config: write to flash and show yellow
-    //     write_config_to_flash(&sd_cfg);
-    //     printf("Config: updated flash config.\n");
-    //     // Yellow: new or changed config
-    //     neopixel_set_rgb(100, 80, 5);
-    //     g_config_state = CONFIG_STATE_NEW_OR_CHANGED;
-    // } else {
-    //     // Match: green (SD present, config OK)
-    //     printf("Config: matches flash.\n");
-    //     neopixel_set_rgb(0, 100, 0);
-    //     g_config_state = CONFIG_STATE_MATCH;
+    // SD present and config parsed: green.
+    neopixel_set_rgb(0, 100, 0);
+    g_config_state = CONFIG_STATE_MATCH;
 
     return g_config_state;
 }
@@ -240,23 +256,25 @@ bool write_capture_to_sd(const uint8_t *buf, uint32_t len, uint32_t sample_hz, c
     }
     neopixel_set_rgb(0, 0, 100);  // blue while writing
 
-    // Rebuild the prefix (g_file_prefix + cap_cnt) only when cap_cnt changes.
-    static int s_last_cap_cnt = -1;
-    if ((int)cap_cnt != s_last_cap_cnt) {
-        snprintf(g_file_prefix, sizeof(g_file_prefix), "%s%u", g_base_prefix, cap_cnt);
-        s_last_cap_cnt = (int)cap_cnt;
-    }
+    // Make sure prefixes have at least their defaults (in case load_config
+    // was never called before this write).
+    if (!g_prefixes_inited) set_default_prefixes();
 
-    char filename[48];
-    // changed capture nomenclature
+    // Select this peripheral's prefix; guard against an out-of-range daq_num.
+    const char *prefix = (daq_num < g_num_periphs) ? g_prefixes[daq_num]
+                                                   : DEFAULT_FILE_PREFIX;
+
+    char filename[64];
+    // Filename: RUN_xxxxx/<prefix>_<cap_cnt>_DD_HH_MM_SS.bin
     if (trigger_time && g_run_dir_name[0]) {
         snprintf(filename, sizeof(filename), "0:%s/%s_%02u_%02u_%02u_%02u_%02u.bin",
                  g_run_dir_name,
-                 g_file_prefix,
+                 prefix,
+                 cap_cnt,
                  trigger_time->day,
                  trigger_time->hour,
                  trigger_time->min,
-                 trigger_time->sec, daq_num);
+                 trigger_time->sec);
     } else {
         snprintf(filename, sizeof(filename), "0:cap_%04lu.bin",
                  (unsigned long)g_file_index);
@@ -296,7 +314,7 @@ bool write_capture_to_sd(const uint8_t *buf, uint32_t len, uint32_t sample_hz, c
 
     printf("SD: wrote %lu bytes to %s\n", (unsigned long)len, filename);
     g_file_index++;
-    neopixel_set_rgb(0, 100, 0);  // green on success
+    // neopixel_set_rgb(0, 100, 0);  // green on success
     return true;
 }
 
@@ -429,8 +447,13 @@ static void write_run_metadata_file(void) {
     snprintf(line, sizeof(line), "SAMPLE_HZ=%u\n", DEFAULT_SAMPLE_HZ);
     f_puts(line, &fil);
 
-    snprintf(line, sizeof(line), "PREFIX=%s##_\n", g_file_prefix);
+    snprintf(line, sizeof(line), "N=%u\n", (unsigned)g_num_periphs);
     f_puts(line, &fil);
+    for (uint8_t i = 0; i < g_num_periphs; i++) {
+        snprintf(line, sizeof(line), "PREFIX%u=%s\n",
+                 (unsigned)(i + 1), g_prefixes[i]);
+        f_puts(line, &fil);
+    }
 
     // snprintf(line, sizeof(line), "DATA_DEPTH=%u\n", CAPTURE_N_SAMPLES);
     // f_puts(line, &fil);

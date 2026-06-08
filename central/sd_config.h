@@ -4,6 +4,12 @@
 #include <stdint.h>
 #include "../peripheral/capture.h"
 
+// ---------- Peripherals / capture prefixes ----------
+// Hard upper bound on the number of prefixes/peripherals supported.
+#define MAX_PREFIXES  8
+// Peripheral count used when config.txt has no "N = _" line.
+#define DEFAULT_N_PERIPHS  MAX_PREFIXES
+
 typedef struct {
     uint16_t year;
     uint8_t month;
@@ -49,13 +55,16 @@ bool sd_init(void);
 // }
 
 /* Load config from SD*/
-// static config_state_t load_config_from_sd(void);
+static config_state_t load_config_from_sd(void);
 
 /* Write one capture buffer to "0:cap_day_hour_min_sec.bin". */
 bool write_capture_to_sd(const uint8_t *buf, uint32_t len,uint32_t sample_hz, const trigger_time_t *trigger_time, uint8_t daq_num, uint8_t cap_cnt);
 
 /* Unmount "0:" and release the SD card. Call before halting or reset. */
 void sd_unmount(void);
+
+/* Number of peripherals, from config.txt "N = _" (default DEFAULT_N_PERIPHS). */
+uint8_t sd_get_num_periphs(void);
 
 
 void init_run_directory(void);
