@@ -196,7 +196,6 @@ int main(void) {
     printf("\n=== Central DAQ ===\n");
     printf("sys_clk = %u Hz\n", clock_get_hz(clk_sys));
 
-    neopixel_init();  // dim orange = starting
     rtc_init(); //for now since we dont have the battery running the rtc in the background
 
     // if (logic_has_saved_capture()) {
@@ -806,6 +805,8 @@ int main(void) {
     while (true) {
         init_run_directory();
         arm_and_trigger_init();
+        neopixel_init();  // dim orange = starting
+
 
         gpio_init(SPI_TX_PIN);
         gpio_set_dir(SPI_TX_PIN, GPIO_OUT);
@@ -818,12 +819,11 @@ int main(void) {
 
         // 1. wait for universal ARM signal (100 ms pulse high)
         while(!gpio_get(ARM_IN_PIN)) tight_loop_contents();
-        neopixel_blink_once(50, 50, 50, 500); // grey = arm pulse initiated
         gpio_put(SPI_TX_PIN, 1);
         sleep_ms(1000);
         gpio_put(SPI_TX_PIN, 0);
         printf("ARM pulse received\n");
-        neopixel_deinit();
+        neopixel_blink_once(50, 50, 50, 500); // grey = arm pulse initiated
         
         sleep_ms(1000);
         gpio_put(SPI_TX_PIN, 0);
@@ -944,15 +944,17 @@ int main(void) {
             // }
 
             bool transfer = write_capture_to_sd(rx_buf, CAPTURE_BYTES, DEFAULT_SAMPLE_HZ, &trigger_time, v, cap_cnt);
+
+            neopixel_init();
             if (!transfer) {
                 printf("ERROR: SD write failed for periph %d\n", v);
-                // neopixel_blink_once(100, 0, 0, 1000); //red  
+                neopixel_blink_once(100, 0, 0, 1000); //red  
             }
             else {
-                // neopixel_blink_once(0, 100, 0, 1000); //green
+                neopixel_blink_once(0, 100, 0, 1000); //green
             }
+            neopixel_deinit();
 
-            // sleep_ms(STEP_MS - FLASH_MS);
         }
 
         printf("Cycle complete\n");
