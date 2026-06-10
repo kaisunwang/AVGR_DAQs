@@ -168,7 +168,7 @@ void neopixel_init(void) {
     add_repeating_timer_ms(-5, neopixel_blink_timer_cb, NULL, &g_np_timer);
 
     /* Dim orange blink during SD/config init (10k blinks = ~500 s if needed) */
-    // neopixel_blink_multiple_start(15, 2, 0, 50, 50, 10000);
+    neopixel_blink_multiple_start(15, 2, 0, 50, 50, 10000);
 }
 
 /* Stop the blink timer (e.g. after config loaded, final LED set elsewhere). */

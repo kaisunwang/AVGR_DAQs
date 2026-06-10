@@ -801,11 +801,13 @@ int main(void) {
 
     printf("Number of peripherals: %u\n", sd_get_num_periphs());
     demux_init();
+    neopixel_init();
+
 
     while (true) {
+        printf("capture number: %d\n", cap_cnt);
         init_run_directory();
         arm_and_trigger_init();
-        neopixel_init();  // dim orange = starting
 
 
         gpio_init(SPI_TX_PIN);
@@ -820,11 +822,12 @@ int main(void) {
         // 1. wait for universal ARM signal (100 ms pulse high)
         while(!gpio_get(ARM_IN_PIN)) tight_loop_contents();
         gpio_put(SPI_TX_PIN, 1);
-        sleep_ms(1000);
+        sleep_ms(2000); // 2 seconds to arm
         gpio_put(SPI_TX_PIN, 0);
         printf("ARM pulse received\n");
         neopixel_blink_once(50, 50, 50, 500); // grey = arm pulse initiated
-        
+        neopixel_deinit();
+
         sleep_ms(1000);
         gpio_put(SPI_TX_PIN, 0);
         sd_init();
@@ -892,56 +895,6 @@ int main(void) {
             gpio_set_dir(SPI_CS_PIN, GPIO_OUT);
             gpio_put(SPI_CS_PIN, 1);   // CS idle high — demux deselected
 
-            // Print sampled bytes from rx_buf as full 8-bit binary values.
-            // // rx_buf is the raw byte stream from the peripheral — sample s is rx_buf[s].
-            // {
-            //     for (int row = 0; row < 50; row++) {
-            //         uint32_t first_step = (uint32_t)row * 20;
-            //         printf("[%6lu-%6lu]:",
-            //             (unsigned long)(first_step * 50u),
-            //             (unsigned long)((first_step + 19) * 50u));
-            //         for (int col = 0; col < 40; col++) {
-            //             uint32_t s = (first_step + (uint32_t)col) * 50u;
-            //             if (s < CAPTURE_BYTES) {
-            //                 uint8_t b = rx_buf[s];
-            //                 char bits[9];
-            //                 for (int k = 0; k < 8; k++) {
-            //                     bits[k] = (b & (0x80u >> k)) ? '1' : '0';
-            //                 }
-            //                 bits[8] = '\0';
-            //                 printf(" %s", bits);
-            //             } else {
-            //                 printf(" --------");
-            //             }
-            //         }
-            //         printf("\n");
-            //     }
-            // }
-
-            // Find received bytes where bit 7 != bit 6 (sanity check on rx_buf)
-            // {
-            //     const uint8_t *bytes = rx_buf;
-            //     uint32_t mismatches = 0;
-            //     uint32_t scan_limit = 10000u;
-            //     if (scan_limit > CAPTURE_BYTES) scan_limit = CAPTURE_BYTES;
-            //     printf("Scanning first %lu bytes for bit7 != bit6...\n",
-            //            (unsigned long)scan_limit);
-            //     for (uint32_t i = 0; i < scan_limit; i++) {
-            //         uint8_t b = bytes[i];
-            //         if (((b >> 7) & 1u) != ((b >> 6) & 1u)) {
-            //             char bits[9];
-            //             for (int k = 0; k < 8; k++) {
-            //                 bits[k] = (b & (0x80u >> k)) ? '1' : '0';
-            //             }
-            //             bits[8] = '\0';
-            //             printf("  idx=%6lu  byte=0x%02X  bin=%s\n",
-            //                    (unsigned long)i, b, bits);
-            //             mismatches++;
-            //         }
-            //     }
-            //     printf("Done. %lu mismatches in %lu bytes.\n",
-            //            (unsigned long)mismatches, (unsigned long)scan_limit);
-            // }
 
             bool transfer = write_capture_to_sd(rx_buf, CAPTURE_BYTES, DEFAULT_SAMPLE_HZ, &trigger_time, v, cap_cnt);
 
@@ -951,9 +904,8 @@ int main(void) {
                 neopixel_blink_once(100, 0, 0, 1000); //red  
             }
             else {
-                neopixel_blink_once(0, 100, 0, 1000); //green
+                neopixel_set_rgb(0, 100, 0); //green
             }
-            neopixel_deinit();
 
         }
 
@@ -962,7 +914,6 @@ int main(void) {
         sleep_ms(1000);
         // neopixel_set_rgb(0, 100, 0); //green
         sleep_ms(1000);
-
         cap_cnt++;
 
     }

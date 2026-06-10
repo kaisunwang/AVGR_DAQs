@@ -214,8 +214,6 @@ int main(void) {
 
     // ---------- CAPTURE SETUP ----------
 
-    neopixel_cancel_timer();
-
     printf("PIO DAQ: Initialising\n");
     set_sys_clock_khz(200000, true);
     neopixel_init();
@@ -252,6 +250,7 @@ int main(void) {
     while (true) {
         //initialize ARM and TRIGGER pins
         arm_and_trigger_init();
+        neopixel_init();
 
         //initialize ACK (CS) pin
         gpio_init(SPI_CS_PIN);
