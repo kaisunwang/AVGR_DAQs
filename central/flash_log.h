@@ -33,7 +33,6 @@ void flash_log_close(void);
 /* Return the index of the last file written (increments each open). */
 uint32_t flash_log_get_index(void);
 
-
 /* Load from Flash*/
 // bool read_config_from_flash(flash_config_t *out);
 

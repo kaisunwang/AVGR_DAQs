@@ -1,0 +1,271 @@
+/**
+ * Central DAQ — SPI master
+ *
+ * SPI0 pins (hardware CS):
+ *   RX=GPIO0  CS=GPIO1  TX=GPIO3  SCK=GPIO2
+ *
+ * Peripheral handshake GPIOs:
+ *   Periph 0: READY=GPIO26 (out, to periph)  ACK=GPIO27 (in, from periph)
+ *   Periph 1: READY=GPIO28 (out, to periph)  ACK=GPIO29 (in, from periph)
+ *
+ * SD card on SPI1: MISO=GPIO12, MOSI=GPIO11, SCK=GPIO10, CS=GPIO13
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "pico/stdlib.h"
+#include "pico/stdio_usb.h"
+#include "hardware/spi.h"
+#include "hardware/gpio.h"
+#include "hardware/dma.h"
+#include "hardware/clocks.h"
+#include "hardware/i2c.h"
+#include "flash_log.h"
+
+#include "neopixel.h"
+#include "sd_config.h"
+#include "rtc.h"
+
+// ---------- SPI0 (DAQ comms) ----------
+#define DAQ_SPI_INST    spi0
+#define SPI_RX_PIN      0
+#define SPI_CS_PIN      1
+#define SPI_TX_PIN      3
+#define SPI_SCK_PIN     6
+#define SPI_BAUD_HZ     (6250u * 1000u)   // 6.25kHz
+
+#define A_PIN      27   // Select A (MSB)
+#define B_PIN      28   // Select B
+#define C_PIN      29   // Select C (LSB)
+#define G1_PIN     26   // GPIO26. G2 pin is "actual" CS line
+
+#define ARM_IN_PIN      5   // arm input
+#define TRIGGER_IN_PIN  4   // trigger input
+
+#define STEP_MS      5000   // dwell time per select combination
+#define FLASH_MS     40     // brief flash at step transition
+
+// ---------- External RTC (MCP7940N) ----------
+#define RTC_I2C       i2c0
+#define RTC_SDA_PIN   8
+#define RTC_SCL_PIN   9
+#define RTC_BAUD_HZ   (200 * 1000u) // 400 kHz
+static trigger_time_t current_time = {0};
+
+// ---------- Peripherals ----------
+// N_PERIPHS now comes from sd_config.h
+#define DEFAULT_SAMPLE_HZ   (100u * 1000000u) //100 MHz
+uint8_t cap_cnt = 0; // suppoed to be used in trigger capture info but not clear whether working bc rearm is funky
+
+// ---------- Capture buffer (131072 bytes = 128 kB) ----------
+#define CAPTURE_BYTES   131072u
+static uint8_t rx_buf[CAPTURE_BYTES];
+
+#define BUFFER_SIZE  512    // # 8 bit words
+static uint8_t buffer_A[BUFFER_SIZE];
+static uint dma_chan;
+static dma_channel_config dma_c;
+static trigger_time_t trigger_time = {0}; // for the rtc
+
+// ---------- run diorecotry tracking ----------
+// #define RUN_DIR_NAME_MAX_LEN  16
+// static uint32_t g_run_index = 0;
+// static char     g_run_dir_name[RUN_DIR_NAME_MAX_LEN] = {0};  // e.g. "RUN_00012"
+// static uint32_t g_target_sample_hz = DEFAULT_SAMPLE_HZ;
+// static char     g_file_prefix[FILE_PREFIX_MAX_LEN] = DEFAULT_FILE_PREFIX;
+
+
+
+// ---------- SPI init ----------
+static void spi_master_init(void) {
+    spi_init(DAQ_SPI_INST, SPI_BAUD_HZ);
+    gpio_set_function(SPI_RX_PIN,  GPIO_FUNC_SPI);
+    gpio_set_function(SPI_CS_PIN,  GPIO_FUNC_SPI);   // hardware CS
+    gpio_set_function(SPI_TX_PIN,  GPIO_FUNC_SPI);
+    gpio_set_function(SPI_SCK_PIN, GPIO_FUNC_SPI);
+}
+
+// ---------- Periph ACK init ----------
+static void arm_and_trigger_init(void) {
+    gpio_init(ARM_IN_PIN);
+    gpio_set_dir(ARM_IN_PIN, GPIO_IN);
+    gpio_pull_down(ARM_IN_PIN);
+    gpio_init(TRIGGER_IN_PIN);
+    gpio_set_dir(TRIGGER_IN_PIN, GPIO_IN);
+    gpio_pull_down(TRIGGER_IN_PIN);
+
+    
+}
+// ---------- Demux init ----------
+static void demux_init(void) {
+    gpio_init(A_PIN);
+    gpio_set_dir(A_PIN, GPIO_OUT);
+    gpio_put(A_PIN, 0);
+    gpio_init(B_PIN);
+    gpio_set_dir(B_PIN, GPIO_OUT);
+    gpio_put(B_PIN, 0);
+    gpio_init(C_PIN);
+    gpio_set_dir(C_PIN, GPIO_OUT);
+    gpio_put(C_PIN, 0);
+    gpio_init(G1_PIN);
+    gpio_set_dir(G1_PIN, GPIO_OUT);
+    gpio_put(G1_PIN, 1);    // G1 IS ALWAYS HIGH
+}
+
+// ---------- INITIALIZE CLOCK -----------------
+static void rtc_init(void) {
+    i2c_init(RTC_I2C, RTC_BAUD_HZ);
+    gpio_set_function(RTC_SDA_PIN, GPIO_FUNC_I2C);
+    gpio_set_function(RTC_SCL_PIN, GPIO_FUNC_I2C);
+    gpio_pull_up(RTC_SDA_PIN);
+    gpio_pull_up(RTC_SCL_PIN);
+    
+
+    if (!mcp_is_running(RTC_I2C)) {
+        // Seed an initial time from the firmware build time ("hh:mm:ss") and
+        // start the oscillator so the chip keeps track of time without external power
+        const char *bt = __TIME__;
+        uint8_t hh = (uint8_t)((bt[0] - '0') * 10 + (bt[1] - '0'));
+        uint8_t mm = (uint8_t)((bt[3] - '0') * 10 + (bt[4] - '0'));
+        uint8_t ss = (uint8_t)((bt[6] - '0') * 10 + (bt[7] - '0'));
+        printf("Setting RTC time to %02u:%02u:%02u\n", hh, mm, ss);
+        printf("RTC is not running. Setting time...\n");
+        mcp_set_time(RTC_I2C, hh, mm, ss);
+    } else {
+        printf("RTC is running. Getting time...\n");
+        current_time = rtc_get_time(RTC_I2C);
+        printf("RTC: %02u:%02u:%02u\n", current_time.hour, current_time.min, current_time.sec);
+    }
+    mcp_enable_battery(RTC_I2C);
+    printf("RTC battery enabled\n");
+}
+
+
+// ---------- Main ----------
+int main(void) {
+    stdio_init_all();
+    for (int i = 5; i > 0; i--) {
+        sleep_ms(1000);
+        if (stdio_usb_connected())
+            printf("USB connected, starting in %d...\n", i);
+    }
+    printf("\n=== Central DAQ ===\n");
+    printf("sys_clk = %u Hz\n", clock_get_hz(clk_sys));
+
+    rtc_init(); //for now since we dont have the battery running the rtc in the background
+
+        
+    // ---------- CAPTURE LOOP ----------
+
+    // Mount SD card for logging
+    if (!sd_init()) {
+        neopixel_set_rgb(100, 0, 0);
+        printf("ERROR: SD mount failed. Halting.\n");
+        while (true) tight_loop_contents();
+    }
+    // neopixel_set_rgb(0, 0, 50);   // dim blue = SD ready, waiting
+
+    printf("Number of peripherals: %u\n", sd_get_num_periphs());
+    demux_init();
+    neopixel_init();
+
+
+    while (true) {
+        printf("capture number: %d\n", cap_cnt);
+        init_run_directory();
+        arm_and_trigger_init();
+
+
+        gpio_init(SPI_TX_PIN);
+        gpio_set_dir(SPI_TX_PIN, GPIO_OUT);
+        gpio_put(SPI_TX_PIN, 0);
+        // CS held high as plain GPIO until first ACK pulse (never float)
+
+        gpio_init(SPI_CS_PIN);
+        gpio_set_dir(SPI_CS_PIN, GPIO_OUT);
+        gpio_put(SPI_CS_PIN, 1);
+
+        // 1. wait for universal ARM signal (100 ms pulse high)
+        while(!gpio_get(ARM_IN_PIN)) tight_loop_contents();
+        gpio_put(SPI_TX_PIN, 1);
+        sleep_ms(2000); // 2 seconds to arm
+        gpio_put(SPI_TX_PIN, 0);
+        printf("ARM pulse received\n");
+        neopixel_blink_once(50, 50, 50, 500); // grey = arm pulse initiated
+        neopixel_deinit();
+
+        sleep_ms(1000);
+        gpio_put(SPI_TX_PIN, 0);
+        sd_init();
+        
+
+        // 2. wait for trigger pulse (100 ms pulse high)
+        while(!gpio_get(TRIGGER_IN_PIN)) tight_loop_contents();
+        trigger_time = rtc_get_time(RTC_I2C);
+        printf("RTC: %02u:%02u:%02u\n",
+           trigger_time.hour, trigger_time.min, trigger_time.sec);
+        // neopixel_blink_once(50, 50, 50, 500); // grey = trigger pulse initiated
+        printf("TRIGGER pulse received\n");
+
+        sleep_ms(3000);
+
+        
+        uint8_t rx[256] = {0};
+        stdio_flush();
+
+        for (int v = 0; v < sd_get_num_periphs(); v++) {
+            // select the peripheral via demux. G1 is always high. reference table respective A, B, C values
+            int c_sel = (v >> 2) & 1;
+            int b_sel = (v >> 1) & 1;
+            int a_sel =  v       & 1;
+            gpio_put(A_PIN, a_sel);
+            gpio_put(B_PIN, b_sel);
+            gpio_put(C_PIN, c_sel);
+            sleep_us(10);   // demux settle
+            
+            // ACK pulse: CS low for 100 µs through demux to selected peripheral
+            gpio_put(SPI_CS_PIN, 0);
+            sleep_us(100);
+            gpio_put(SPI_CS_PIN, 1);
+            printf("ACK pulsed to peripheral %d\n", v);
+
+            // Init SPI master (takes over CS pin as hardware function)
+            spi_master_init();
+
+            // Give peripheral time to init SPI and pre-load TX FIFO
+            sleep_ms(1);
+            
+            printf("Collecting from peripheral %d\n", v);
+            spi_read_blocking(DAQ_SPI_INST, 0, rx_buf, CAPTURE_BYTES);
+
+            // Deinit SPI, return CS to GPIO OUT HIGH for next ACK pulse
+            spi_deinit(DAQ_SPI_INST);
+            gpio_init(SPI_CS_PIN);
+            gpio_set_dir(SPI_CS_PIN, GPIO_OUT);
+            gpio_put(SPI_CS_PIN, 1);   // CS idle high — demux deselected
+
+
+            bool transfer = write_capture_to_sd(rx_buf, CAPTURE_BYTES, DEFAULT_SAMPLE_HZ, &trigger_time, v, cap_cnt);
+
+            neopixel_init();
+            if (!transfer) {
+                printf("ERROR: SD write failed for periph %d\n", v);
+                neopixel_blink_once(100, 0, 0, 1000); //red  
+            }
+            else {
+                neopixel_set_rgb(0, 100, 0); //green
+            }
+
+        }
+
+        printf("Cycle complete\n");
+        sd_unmount();
+        sleep_ms(1000);
+        // neopixel_set_rgb(0, 100, 0); //green
+        sleep_ms(1000);
+        cap_cnt++;
+
+    }
+}

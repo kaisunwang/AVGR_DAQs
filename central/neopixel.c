@@ -1,7 +1,5 @@
 /**
  * NeoPixel (WS2812) status LED on GPIO16
- *
- * - PIO state machine drives the one-wire protocol
  * - Supports solid color, single blink, and non-blocking multi-blink sequences
  * - Timer callback services blink state every 5 ms
  */

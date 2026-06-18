@@ -1,6 +1,6 @@
 /**
- * SD capture file logging.
- * Each capture is written to a sequentially numbered binary file: cap_NNNN.bin
+ * sd capture file logging.
+ * not used in june avgr tests
  */
 
 #include "flash_log.h"

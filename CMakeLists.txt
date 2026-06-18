@@ -33,18 +33,18 @@ add_subdirectory(
 )
 
 # ── Peripheral target ─────────────────────────────────────────────────────────
-add_executable(peripheral_logic_analyzer
-    peripheral/logic_analyzer.c
+add_executable(peripheral
+    peripheral/peripheral.c
     peripheral/spi_slave_config.c
     peripheral/neopixel.c
     peripheral/capture.c
 )
 
-pico_generate_pio_header(peripheral_logic_analyzer ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
+pico_generate_pio_header(peripheral ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
 
-target_include_directories(peripheral_logic_analyzer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/peripheral)
+target_include_directories(peripheral PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/peripheral)
 
-target_link_libraries(peripheral_logic_analyzer PRIVATE
+target_link_libraries(peripheral PRIVATE
     pico_stdlib
     hardware_pio
     hardware_dma
@@ -53,24 +53,24 @@ target_link_libraries(peripheral_logic_analyzer PRIVATE
     hardware_i2c
 )
 
-pico_enable_stdio_usb(peripheral_logic_analyzer 1)
-pico_enable_stdio_uart(peripheral_logic_analyzer 0)
-pico_add_extra_outputs(peripheral_logic_analyzer)
+pico_enable_stdio_usb(peripheral 1)
+pico_enable_stdio_uart(peripheral 0)
+pico_add_extra_outputs(peripheral)
 
 # ── Central target ────────────────────────────────────────────────────────────
-add_executable(central_logic_analyzer
-    central/logic_analyzer.c
+add_executable(central
+    central/central.c
     central/flash_log.c
     central/neopixel.c
     central/sd_config.c
     central/rtc.c
 )
 
-pico_generate_pio_header(central_logic_analyzer ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
+pico_generate_pio_header(central ${CMAKE_CURRENT_LIST_DIR}/ws2812.pio)
 
-target_include_directories(central_logic_analyzer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/central)
+target_include_directories(central PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/central)
 
-target_link_libraries(central_logic_analyzer PRIVATE
+target_link_libraries(central PRIVATE
     pico_stdlib
     hardware_pio
     hardware_dma
@@ -82,6 +82,6 @@ target_link_libraries(central_logic_analyzer PRIVATE
     FatFs_SPI
 )
 
-pico_enable_stdio_usb(central_logic_analyzer 1)
-pico_enable_stdio_uart(central_logic_analyzer 0)
-pico_add_extra_outputs(central_logic_analyzer)
+pico_enable_stdio_usb(central 1)
+pico_enable_stdio_uart(central 0)
+pico_add_extra_outputs(central)

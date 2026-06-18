@@ -1,6 +1,7 @@
 /**
  * PIO capture helpers: bit-packing utilities and state machine setup
  * for 8-bit parallel sampling with ADC clock sideset.
+ * // functions stolen from old version
  */
 
 #include "capture.h"

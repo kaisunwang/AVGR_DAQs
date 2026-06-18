@@ -1,3 +1,6 @@
+/* capture.h */
+// nice helper functions taken from old version
+
 #pragma once
 
 #include "hardware/pio.h"

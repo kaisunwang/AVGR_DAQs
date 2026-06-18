@@ -19,7 +19,7 @@ static inline uint8_t dec_to_bcd(uint8_t dec) {
     return ((dec / 10) << 4) | (dec % 10);
 }
 
-// ── set time ─────────────────────────────────────────────────────────────────
+// ── set time ──────────────────────────────────────────────────────────────
 
 /* Write hours/minutes/seconds and start the oscillator (ST bit), 24-hour mode. */
 void mcp_set_time(i2c_inst_t *i2c, uint8_t hours, uint8_t minutes, uint8_t seconds);
@@ -27,7 +27,7 @@ void mcp_set_time(i2c_inst_t *i2c, uint8_t hours, uint8_t minutes, uint8_t secon
 // ------ turn on battery
 void mcp_enable_battery(i2c_inst_t *i2c);
 
-// ── get time ─────────────────────────────────────────────────────────────────
+// ── get time ────────────────────────────────────────────────────────────
 
 /* Read DAY/SEC/MIN/HOUR from the RTC and return them in a time_t.
    Date fields (year/month/day) are always zeroed. On an I2C error the

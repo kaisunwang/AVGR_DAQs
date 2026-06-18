@@ -90,8 +90,6 @@ static uint32_t g_file_index = 0;
 static uint32_t g_run_index = 0;
 static char     g_run_dir_name[RUN_DIR_NAME_MAX_LEN] = {0};  // e.g. "RUN_00012"
 static uint32_t g_target_sample_hz = DEFAULT_SAMPLE_HZ;
-// Per-peripheral capture prefixes. Index i (0-based) holds the value of
-// PREFIX(i+1) from config.txt, e.g. g_prefixes[0] <- "PREFIX1 = ...".
 static char     g_prefixes[MAX_PREFIXES][FILE_PREFIX_MAX_LEN];
 static bool     g_prefixes_inited = false;
 // Number of peripherals; set from config.txt "N = _", default DEFAULT_N_PERIPHS.
@@ -103,11 +101,6 @@ bool sd_init(void) {
     if (g_mounted) {
         return true;
     }
-    // if (g_init_tried) {
-    //     return false;
-    // }
-
-    // g_init_tried = true;
 
     if (!sd_init_driver()) {
         printf("SD: sd_init_driver() failed.\n");
@@ -157,8 +150,8 @@ static config_state_t load_config_from_sd(void) {
 
     if (!g_mounted) {
         printf("Config: SD not mounted; using defaults / flash.\n");
-        // LED blue: will write to flash
-        neopixel_set_rgb(0, 0, 100);
+        // LED blue: SHOULD write to flash but not currently implemented
+        neopixel_set_rgb(100, 0, 0); //red
         g_config_state = CONFIG_STATE_NO_SD;
         return g_config_state;
     }
@@ -184,6 +177,7 @@ static config_state_t load_config_from_sd(void) {
 
     // --- SD config file is open here ---
     // Parse "N = _" (peripheral count) and "PREFIXn = value" (n is 1-based).
+    // thanks claude
     char line[64];
     while (f_gets(line, sizeof(line), &fil)) {
         trim_line(line);
@@ -440,7 +434,7 @@ static void write_run_metadata_file(void) {
 
     char line[64];
 
-    // Basic run info
+    // Basic run info. note: old version has other info that might be relevant
     snprintf(line, sizeof(line), "RUN_INDEX=%lu\n", (unsigned long)g_run_index);
     f_puts(line, &fil);
 
